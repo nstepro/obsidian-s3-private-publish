@@ -1,0 +1,21 @@
+{
+  "name": "obsidian-s3-private-publish",
+  "version": "1.0.0",
+  "description": "",
+  "main": "publish.js",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "aws-sdk": "^2.1295.0",
+    "dotenv": "^16.0.3",
+    "gray-matter": "^4.0.3",
+    "short-uuid": "^4.2.2"
+  }
+}
