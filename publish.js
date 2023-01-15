@@ -31,6 +31,8 @@ glob(baseDir + '/**/*.md', (err,files) => {
         // If publish tag is added
         if (m.matter.data.publish) {
             
+            console.log(path.parse(file).name);
+            
             var newFileInd = false;
             // If GUID doesn't already exist
             if (m.matter.data.guid === undefined) {
@@ -45,29 +47,47 @@ glob(baseDir + '/**/*.md', (err,files) => {
                 newFileInd = true;
             }
 
+            // Add title
+            m.matter.content = `# ${path.parse(file).name} \n --- \n`+m.matter.content;
+
+            // Upload dependent images
+            m.matter.content.split('![[').forEach((str,i)=>{
+                if (i>0) {
+                    var imgName = str.split(']]')[0];
+                    glob.sync(baseDir + `/**/${imgName}`).forEach(file => {
+                        var imgData = fs.readFileSync(file);
+                        uploadToS3(imgName,imgData);
+                    });
+                }
+            });
+
             // Log for reporting
             fileList.push({filename: path.basename(file), new: newFileInd, guid: m.matter.data.guid});
 
             // Upload file to S3 (overwrite if exists)
-            const params = {
-                Bucket: s3Bucket,
-                Key: `${m.matter.data.guid}.md`,
-                Body: matter.stringify(m.matter.content, m.matter.data)
-            }
-            s3.upload(params, (err, data) => {
-                if (err) {
-                    console.log(err);
-                }
-            });
+            uploadToS3(`${m.matter.data.guid}.md`,matter.stringify(m.matter.content, m.matter.data));
         }
     });
 
-    // LOG SUMMARY
-    console.log("Existing Files Updated");
-    console.log(fileList.filter(d=>{return !d.new}));
+    function uploadToS3(fileName, fileContent) {
+        const params = {
+            Bucket: s3Bucket,
+            Key: fileName,
+            Body: fileContent
+        }
+        s3.upload(params, (err, data) => {
+            if (err) {
+                console.log(err);
+            }
+        });
+    }
 
-    console.log("New Files Added:");
-    console.log(fileList.filter(d=>{return d.new}));
+    // // LOG SUMMARY
+    // console.log("Existing Files Updated");
+    // console.log(fileList.filter(d=>{return !d.new}));
+
+    // console.log("New Files Added:");
+    // console.log(fileList.filter(d=>{return d.new}));
 
 
 })
