@@ -32,7 +32,7 @@ glob(baseDir + '/**/*.md', (err,files) => {
         m.matter = matter(m.file);
 
         // Git settings
-        var gitPublish = (!(subDirForGit == null || gitPath == null) && file.indexOf(subDirForGit)>=0 && m.matter.data.git);
+        var gitPublish = (!(subDirForGit == null || gitPath == null) && file.indexOf(subDirForGit)>=0 && m.matter.data.gitURL !== undefined);
         var curAbsDir = path.parse(file).dir;
         var relDir = curAbsDir.substring(curAbsDir.indexOf(subDirForGit)+subDirForGit.length);
         var gitAbsDir = gitPath+'/'+relDir;
