@@ -32,12 +32,13 @@ glob(baseDir + '/**/*.md', (err,files) => {
         m.matter = matter(m.file);
 
         // Git settings
-        var gitPublish = (!(subDirForGit == null || gitPath == null) && file.indexOf(subDirForGit)>=0 && m.matter.data.gitURL !== undefined);
-        var curAbsDir = path.parse(file).dir;
-        var relDir = curAbsDir.substring(curAbsDir.indexOf(subDirForGit)+subDirForGit.length);
-        var gitAbsDir = gitPath+'/'+relDir;
-        var gitFileURL = gitURL+'/'+encodeURIComponent(relDir)+'/'+encodeURIComponent(path.parse(file).base);
-        var updateFile = false;
+        var gitSettings = {}
+        gitSettings.gitPublish = (!(subDirForGit == null || gitPath == null) && file.indexOf(subDirForGit)>=0 && m.matter.data.gitURL !== undefined);
+        gitSettings.curAbsDir = path.parse(file).dir;
+        gitSettings.relDir = gitSettings.curAbsDir.substring(gitSettings.curAbsDir.indexOf(subDirForGit)+subDirForGit.length);
+        gitSettings.gitAbsDir = gitPath+'/'+gitSettings.relDir;
+        gitSettings.gitFileURL = gitURL+'/'+encodeURIComponent(gitSettings.relDir)+'/'+encodeURIComponent(path.parse(file).base);
+        gitSettings.updateFile = false;
 
         // If publish tag is added
         if (m.matter.data.publish) {
@@ -47,80 +48,54 @@ glob(baseDir + '/**/*.md', (err,files) => {
             if (m.matter.data.guid === undefined) {
                 // Add new GUID tag
                 m.matter.data = extend(m.matter.data, {guid:short().new().substring(0,8)});
-                updateFile = true;
+                gitSettings.updateFile = true;
             }
 
             // If GitURL doesn't exist (or is misaligned) - add it
-            if (gitPublish && gitFileURL !== m.matter.data.gitURL ) {
-                m.matter.data = extend(m.matter.data, {gitURL:gitFileURL});
-                updateFile = true;
+            if (gitSettings.gitPublish && gitSettings.gitFileURL !== m.matter.data.gitURL ) {
+                m.matter.data = extend(m.matter.data, {gitURL:gitSettings.gitFileURL});
+                gitSettings.updateFile = true;
             }
         
             // Update file in-place
-            if (updateFile) {
+            if (gitSettings.updateFile) {
                 let data = matter.stringify(m.matter.content, m.matter.data);
                 fs.writeFileSync(file, data);
             }
 
+            // CONTENT MODIFICATIONS
+            // Handle embedded images and markdown
+            m.matter.content = processEmbeds(m.matter.content);
+
+            // Handle remaining links
+            m.matter.content = processRelativePathLinks(m.matter.content, file);
+
+            // S3/GIT SYNC
             // Git Sync
-            if (gitPublish) {
+            if (gitSettings.gitPublish) {
+                var gitContent = m.matter.content;
+                gitContent = processGitImages(gitContent, gitSettings, file);
+
                 // Create path if not exists
-                if (!fs.existsSync(gitAbsDir)){
-                    fs.mkdirSync(gitAbsDir, { recursive: true });
+                if (!fs.existsSync(gitSettings.gitAbsDir)){
+                    fs.mkdirSync(gitSettings.gitAbsDir, { recursive: true });
                 }
 
                 // Copy file
-                fs.copyFileSync(file, gitAbsDir+'/'+path.parse(file).base);
+                fs.writeFileSync(gitSettings.gitAbsDir+'/'+path.parse(file).base, matter.stringify(gitContent, null));
             }
 
-            // S3 Publish
+            // Log for reporting
+            fileList.push({filename: path.basename(file), fileUpdated: gitSettings.updateFile, guid: m.matter.data.guid});
+
             // Add title
             m.matter.content = `# ${path.parse(file).name} \n --- \n`+m.matter.content;
-
-            // Handle embedded images and markdown
-            m.matter.content.split('![[').forEach((str,i)=>{
-                if (i>0) {
-                    var imgName = str.split(']]')[0];
-                    
-                    // If not an image, treat as markdown embed and replace contents inline
-                    if (!imgName.match(/\.(jpg|jpeg|png|gif)$/i)) {
-                        glob.sync(baseDir + `/**/${imgName}.md`).forEach(file => {
-                            var docData = fs.readFileSync(file);
-                            docContent = matter(docData);
-                            m.matter.content = m.matter.content.replaceAll(`![[${imgName}]]`, docContent.content);
-                        });
-                    } 
-                    // Else upload the image
-                    else {
-                        glob.sync(baseDir + `/**/${imgName}`).forEach(file => {
-                            var imgData = fs.readFileSync(file);
-                            uploadToS3(imgName,imgData);
-                        });
-                    }
-                }
-            });
-
-            // Log for reporting
-            fileList.push({filename: path.basename(file), fileUpdated: updateFile, guid: m.matter.data.guid});
-
+            
             // Upload file to S3 (overwrite if exists)
             uploadToS3(`${m.matter.data.guid}.md`,matter.stringify(m.matter.content, m.matter.data));
 
         }
     });
-
-    function uploadToS3(fileName, fileContent) {
-        const params = {
-            Bucket: s3Bucket,
-            Key: fileName,
-            Body: fileContent
-        }
-        s3.upload(params, (err, data) => {
-            if (err) {
-                console.log(err);
-            }
-        });
-    }
 
     // // LOG SUMMARY
     // console.log("Existing Files Updated");
@@ -130,4 +105,83 @@ glob(baseDir + '/**/*.md', (err,files) => {
     // console.log(fileList.filter(d=>{return d.new}));
 
 
-})
+});
+
+
+function uploadToS3(fileName, fileContent) {
+    const params = {
+        Bucket: s3Bucket,
+        Key: fileName,
+        Body: fileContent
+    }
+    s3.upload(params, (err, data) => {
+        if (err) {
+            console.log(err);
+        }
+    });
+}
+
+function processEmbeds(content) {
+    content.split('![[').forEach((str,i)=>{
+        if (i>0) {
+            var imgName = str.split(']]')[0];
+            
+            // If not an image, treat as markdown embed and replace contents inline
+            if (!imgName.match(/\.(jpg|jpeg|png|gif)$/i)) {
+                glob.sync(baseDir + `/**/${imgName}.md`).forEach(file => {
+                    var docData = fs.readFileSync(file);
+                    docContent = matter(docData);
+                    content = content.replaceAll(`![[${imgName}]]`, docContent.content);
+                });
+            } 
+            // Else upload the image
+            else {
+                glob.sync(baseDir + `/**/${imgName}`).forEach(file => {
+                    var imgData = fs.readFileSync(file);
+                    uploadToS3(imgName,imgData);
+                });
+            }
+        }
+    });
+    return content;
+}
+
+function processGitImages(content, gitSettings, file) {
+    content.split('![[').forEach((str,i)=>{
+        if (i>0) {
+            var imgName = str.split(']]')[0];
+
+            if (imgName.match(/\.(jpg|jpeg|png|gif)$/i)) {
+                glob.sync(baseDir + `/**/${imgName}`).forEach(imgFile => {
+
+                    // Make images directory if not exists
+                    var tgtFileDir = gitPath+'/images';
+                    var tgtFileAbsPath = tgtFileDir+'/'+imgName;
+                    var tgtFileRelPath = path.relative(gitSettings.relDir, 'images/'+imgName).replaceAll(/\\/g, "/");
+                    
+                    if (!fs.existsSync(tgtFileDir)){
+                        fs.mkdirSync(tgtFileDir);
+                    }
+                    fs.copyFileSync(imgFile, tgtFileAbsPath);
+                    content = content.replaceAll(`![[${imgName}]]`, `![${imgName}](${encodeURI(tgtFileRelPath)})`);
+                });
+            }
+        }
+    });
+    return content;
+}
+
+function processRelativePathLinks(content, file) {
+    content.split('[[').forEach((str,i)=>{
+        if (i>0) {
+            var linkName = str.split(']]')[0];
+            if (!linkName.toLowerCase().startsWith("http")) {
+                glob.sync(baseDir + `/**/${linkName}.md`).forEach(linkedFile => {
+                    var relPath = path.relative(path.dirname(file), linkedFile).replaceAll(/\\/g, "/");
+                    content = content.replaceAll(`[[${linkName}]]`, `[${linkName}](${encodeURI(relPath)})`);
+                });
+            }
+        }
+    });
+    return content;
+}
