@@ -77,14 +77,26 @@ glob(baseDir + '/**/*.md', (err,files) => {
             // Add title
             m.matter.content = `# ${path.parse(file).name} \n --- \n`+m.matter.content;
 
-            // Upload dependent images
+            // Handle embedded images and markdown
             m.matter.content.split('![[').forEach((str,i)=>{
                 if (i>0) {
                     var imgName = str.split(']]')[0];
-                    glob.sync(baseDir + `/**/${imgName}`).forEach(file => {
-                        var imgData = fs.readFileSync(file);
-                        uploadToS3(imgName,imgData);
-                    });
+                    
+                    // If not an image, treat as markdown embed and replace contents inline
+                    if (!imgName.match(/\.(jpg|jpeg|png|gif)$/i)) {
+                        glob.sync(baseDir + `/**/${imgName}.md`).forEach(file => {
+                            var docData = fs.readFileSync(file);
+                            docContent = matter(docData);
+                            m.matter.content = m.matter.content.replaceAll(`![[${imgName}]]`, docContent.content);
+                        });
+                    } 
+                    // Else upload the image
+                    else {
+                        glob.sync(baseDir + `/**/${imgName}`).forEach(file => {
+                            var imgData = fs.readFileSync(file);
+                            uploadToS3(imgName,imgData);
+                        });
+                    }
                 }
             });
 
