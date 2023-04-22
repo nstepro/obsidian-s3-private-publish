@@ -20,92 +20,111 @@ const s3 = new AWS.S3({
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
 });
 
-// Loop through files
-glob(baseDir + '/**/*.md', (err,files) => {
-    var fileList = [];
-    files.forEach((file)=>{
-        
-        // Read front matter
-        m = {};
-        m.file = fs.readFileSync(file);
-        m.fileSystemInfo = new fsi.FileSystemInfo(file);
-        m.matter = matter(m.file);
+const listAllKeys = (params, out = []) => new Promise((resolve, reject) => {
+  s3.listObjectsV2(params).promise()
+    .then(({Contents, IsTruncated, NextContinuationToken}) => {
+      out.push(...Contents);
+      !IsTruncated ? resolve(out) : resolve(listAllKeys(Object.assign(params, {ContinuationToken: NextContinuationToken}), out));
+    })
+    .catch(reject);
+});
 
-        // Git settings
-        var gitSettings = {}
-        gitSettings.gitPublish = (!(subDirForGit == null || gitPath == null) && file.indexOf(subDirForGit)>=0 && m.matter.data.gitURL !== undefined);
-        gitSettings.curAbsDir = path.parse(file).dir;
-        gitSettings.relDir = gitSettings.curAbsDir.substring(gitSettings.curAbsDir.indexOf(subDirForGit)+subDirForGit.length);
-        gitSettings.gitAbsDir = gitPath+'/'+gitSettings.relDir;
-        gitSettings.gitFileURL = gitURL+'/'+encodeURIComponent(gitSettings.relDir)+'/'+encodeURIComponent(path.parse(file).base);
-        gitSettings.updateFile = false;
 
-        // If publish tag is added
-        if (m.matter.data.publish) {
-            console.log(path.parse(file).name);
+listAllKeys({Bucket: s3Bucket})
+  .then((res)=>{
+    objectMap = {};
+    res.forEach((r)=>{
+        objectMap[r.Key] = r.LastModified
+    });
+    mainFileLoop(objectMap)
+  })
+  .catch(console.log);
+
+
+function mainFileLoop(objectMap) {
+    // Loop through files
+    glob(baseDir + '/**/*.md', (err,files) => {
+        var fileList = [];
+        files.forEach((file)=>{
             
-            // If GUID doesn't already exist
-            if (m.matter.data.guid === undefined) {
-                // Add new GUID tag
-                m.matter.data = extend(m.matter.data, {guid:short().new().substring(0,8)});
-                gitSettings.updateFile = true;
-            }
+            // Read front matter
+            m = {};
+            m.file = fs.readFileSync(file);
+            m.fileSystemInfo = new fsi.FileSystemInfo(file);
+            m.matter = matter(m.file);
 
-            // If GitURL doesn't exist (or is misaligned) - add it
-            if (gitSettings.gitPublish && gitSettings.gitFileURL !== m.matter.data.gitURL ) {
-                m.matter.data = extend(m.matter.data, {gitURL:gitSettings.gitFileURL});
-                gitSettings.updateFile = true;
-            }
-        
-            // Update file in-place
-            if (gitSettings.updateFile) {
-                let data = matter.stringify(m.matter.content, m.matter.data);
-                fs.writeFileSync(file, data);
-            }
+            // Git settings
+            var gitSettings = {}
+            gitSettings.gitPublish = (!(subDirForGit == null || gitPath == null) && file.indexOf(subDirForGit)>=0 && m.matter.data.gitURL !== undefined);
+            gitSettings.curAbsDir = path.parse(file).dir;
+            gitSettings.relDir = gitSettings.curAbsDir.substring(gitSettings.curAbsDir.indexOf(subDirForGit)+subDirForGit.length);
+            gitSettings.gitAbsDir = gitPath+'/'+gitSettings.relDir;
+            gitSettings.gitFileURL = gitURL+'/'+encodeURIComponent(gitSettings.relDir)+'/'+encodeURIComponent(path.parse(file).base);
+            gitSettings.updateFile = false;
 
-            // CONTENT MODIFICATIONS
-            // Handle embedded images and markdown
-            m.matter.content = processEmbeds(m.matter.content);
-
-            // Handle remaining links
-            m.matter.content = processRelativePathLinks(m.matter.content, file);
-
-            // S3/GIT SYNC
-            // Git Sync
-            if (gitSettings.gitPublish) {
-                var gitContent = m.matter.content;
-                gitContent = processGitImages(gitContent, gitSettings, file);
-
-                // Create path if not exists
-                if (!fs.existsSync(gitSettings.gitAbsDir)){
-                    fs.mkdirSync(gitSettings.gitAbsDir, { recursive: true });
+            // If publish tag is added
+            if (m.matter.data.publish) {
+                
+                
+                // If GUID doesn't already exist
+                if (m.matter.data.guid === undefined) {
+                    // Add new GUID tag
+                    m.matter.data = extend(m.matter.data, {guid:short().new().substring(0,8)});
+                    gitSettings.updateFile = true;
                 }
 
-                // Copy file
-                fs.writeFileSync(gitSettings.gitAbsDir+'/'+path.parse(file).base, matter.stringify(gitContent, null));
+                // Only proceed if updated since last S3 file (or S3 file doesn't exist)
+                if (fs.statSync(file).mtime>objectMap[`${m.matter.data.guid}.md`] || objectMap[`${m.matter.data.guid}.md`]==undefined) {
+                    console.log(`Processing modified file: ${path.parse(file).name}`);
+
+                    // If GitURL doesn't exist (or is misaligned) - add it
+                    if (gitSettings.gitPublish && gitSettings.gitFileURL !== m.matter.data.gitURL ) {
+                        m.matter.data = extend(m.matter.data, {gitURL:gitSettings.gitFileURL});
+                        gitSettings.updateFile = true;
+                    }
+                
+                    // Update file in-place
+                    if (gitSettings.updateFile) {
+                        let data = matter.stringify(m.matter.content, m.matter.data);
+                        fs.writeFileSync(file, data);
+                    }
+
+                    // CONTENT MODIFICATIONS
+                    // Handle embedded images and markdown
+                    m.matter.content = processEmbeds(m.matter.content);
+
+                    // Handle remaining links
+                    m.matter.content = processRelativePathLinks(m.matter.content, file);
+
+                    // S3/GIT SYNC
+                    // Git Sync
+                    if (gitSettings.gitPublish) {
+                        var gitContent = m.matter.content;
+                        gitContent = processGitImages(gitContent, gitSettings, file);
+
+                        // Create path if not exists
+                        if (!fs.existsSync(gitSettings.gitAbsDir)){
+                            fs.mkdirSync(gitSettings.gitAbsDir, { recursive: true });
+                        }
+
+                        // Copy file
+                        fs.writeFileSync(gitSettings.gitAbsDir+'/'+path.parse(file).base, matter.stringify(gitContent, null));
+                    }
+
+                    // Log for reporting
+                    fileList.push({filename: path.basename(file), fileUpdated: gitSettings.updateFile, guid: m.matter.data.guid});
+
+                    // Add title
+                    m.matter.content = `# ${path.parse(file).name} \n --- \n`+m.matter.content;
+                    
+                    // Upload file to S3 (overwrite if exists)
+                    uploadToS3(`${m.matter.data.guid}.md`,matter.stringify(m.matter.content, m.matter.data));
+                }
             }
+        });
 
-            // Log for reporting
-            fileList.push({filename: path.basename(file), fileUpdated: gitSettings.updateFile, guid: m.matter.data.guid});
-
-            // Add title
-            m.matter.content = `# ${path.parse(file).name} \n --- \n`+m.matter.content;
-            
-            // Upload file to S3 (overwrite if exists)
-            uploadToS3(`${m.matter.data.guid}.md`,matter.stringify(m.matter.content, m.matter.data));
-
-        }
     });
-
-    // // LOG SUMMARY
-    // console.log("Existing Files Updated");
-    // console.log(fileList.filter(d=>{return !d.new}));
-
-    // console.log("New Files Added:");
-    // console.log(fileList.filter(d=>{return d.new}));
-
-
-});
+}
 
 
 function uploadToS3(fileName, fileContent) {
