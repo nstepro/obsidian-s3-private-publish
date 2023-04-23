@@ -91,7 +91,7 @@ function mainFileLoop(objectMap) {
 
                     // CONTENT MODIFICATIONS
                     // Handle embedded images and markdown
-                    m.matter.content = processEmbeds(m.matter.content);
+                    m.matter.content = processEmbeds(m.matter.content, m.matter.data);
 
                     // Handle remaining links
                     m.matter.content = processRelativePathLinks(m.matter.content, file);
@@ -140,11 +140,20 @@ function uploadToS3(fileName, fileContent) {
     });
 }
 
-function processEmbeds(content) {
+function processEmbeds(content, data) {
+    var images = [];
     content.split('![[').forEach((str,i)=>{
         if (i>0) {
-            var imgName = str.split(']]')[0];
-            
+            images.push(str.split(']]')[0]);
+        }
+    });
+    if (data.links != undefined) {
+        data.links.forEach((link) => {
+            images.push(link.img);
+        });
+    }
+
+    images.forEach((imgName)=>{  
             // If not an image, treat as markdown embed and replace contents inline
             if (!imgName.match(/\.(jpg|jpeg|png|gif)$/i)) {
                 glob.sync(baseDir + `/**/${imgName}.md`).forEach(file => {
@@ -160,8 +169,7 @@ function processEmbeds(content) {
                     uploadToS3(imgName,imgData);
                 });
             }
-        }
-    });
+    })
     return content;
 }
 
