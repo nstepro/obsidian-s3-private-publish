@@ -15,9 +15,12 @@
   "dependencies": {
     "aws-sdk": "^2.1295.0",
     "dotenv": "^16.0.3",
+    "front-matter": "^4.0.2",
     "fs-filesysteminfo": "^1.0.6",
     "glob": "^8.1.0",
     "gray-matter": "^4.0.3",
+    "js-yaml": "^4.1.0",
+    "moment": "^2.29.4",
     "short-uuid": "^4.2.2"
   }
 }

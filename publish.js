@@ -2,11 +2,11 @@ let extend = require('util')._extend;
 let fs = require('fs');
 let path = require('path');
 let glob = require("glob");
-let fsi = require('fs-filesysteminfo');
 const dotenv = require('dotenv');
 let matter = require('gray-matter');
 let short = require('short-uuid');
 let AWS = require('aws-sdk');
+const moment = require('moment');
 
 // Get env variables
 dotenv.config();
@@ -50,8 +50,14 @@ function mainFileLoop(objectMap) {
             // Read front matter
             m = {};
             m.file = fs.readFileSync(file);
-            m.fileSystemInfo = new fsi.FileSystemInfo(file);
             m.matter = matter(m.file);
+
+            // Get create/modify dates
+            const createdDate = moment(fs.statSync(file).birthtime).format('MMM D, YYYY h:mm A');
+            if (m.matter.data.created != createdDate) {
+                m.matter.data.created = createdDate;
+                fs.writeFileSync(file, matter.stringify(m.matter.content, m.matter.data));
+            }
 
             // Git settings
             var gitSettings = {}
@@ -85,8 +91,7 @@ function mainFileLoop(objectMap) {
                 
                     // Update file in-place
                     if (gitSettings.updateFile) {
-                        let data = matter.stringify(m.matter.content, m.matter.data);
-                        fs.writeFileSync(file, data);
+                        fs.writeFileSync(file, matter.stringify(m.matter.content, m.matter.data));
                     }
 
                     // CONTENT MODIFICATIONS
