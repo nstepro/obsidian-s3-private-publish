@@ -71,7 +71,6 @@ function mainFileLoop(objectMap) {
             // If publish tag is added
             if (m.matter.data.publish) {
                 
-                
                 // If GUID doesn't already exist
                 if (m.matter.data.guid === undefined) {
                     // Add new GUID tag
@@ -164,7 +163,7 @@ function processEmbeds(content, data) {
                 glob.sync(baseDir + `/**/${imgName}.md`).forEach(file => {
                     var docData = fs.readFileSync(file);
                     docContent = matter(docData);
-                    content = content.replaceAll(`![[${imgName}]]`, docContent.content);
+                    content = content.replace(new RegExp(`!\\[\\[${imgName}]]`, 'g'), docContent.content);
                 });
             } 
             // Else upload the image
@@ -185,17 +184,17 @@ function processGitImages(content, gitSettings, file) {
 
             if (imgName.match(/\.(jpg|jpeg|png|gif)$/i)) {
                 glob.sync(baseDir + `/**/${imgName}`).forEach(imgFile => {
-
+                    
                     // Make images directory if not exists
                     var tgtFileDir = gitPath+'/images';
                     var tgtFileAbsPath = tgtFileDir+'/'+imgName;
-                    var tgtFileRelPath = path.relative(gitSettings.relDir, 'images/'+imgName).replaceAll(/\\/g, "/");
+                    var tgtFileRelPath = path.relative(gitSettings.relDir, 'images/'+imgName).replace(/\\/g, "/");
                     
                     if (!fs.existsSync(tgtFileDir)){
                         fs.mkdirSync(tgtFileDir);
                     }
                     fs.copyFileSync(imgFile, tgtFileAbsPath);
-                    content = content.replaceAll(`![[${imgName}]]`, `![${imgName}](${encodeURI(tgtFileRelPath)})`);
+                    content = content.replace(new RegExp(`!\\[\\[${imgName}]]`, 'g'), `![${imgName}](${encodeURI(tgtFileRelPath)})`);
                 });
             }
         }
@@ -209,8 +208,8 @@ function processRelativePathLinks(content, file) {
             var linkName = str.split(']]')[0];
             if (!linkName.toLowerCase().startsWith("http")) {
                 glob.sync(baseDir + `/**/${linkName}.md`).forEach(linkedFile => {
-                    var relPath = path.relative(path.dirname(file), linkedFile).replaceAll(/\\/g, "/");
-                    content = content.replaceAll(`[[${linkName}]]`, `[${linkName}](${encodeURI(relPath)})`);
+                    var relPath = path.relative(path.dirname(file), linkedFile).replace(/\\/g, "/");
+                    content = content.replace(new RegExp(`\\[\\[${linkName}]]`, 'g'), `[${linkName}](${encodeURI(relPath)})`);
                 });
             }
         }
