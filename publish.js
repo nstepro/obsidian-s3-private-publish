@@ -54,7 +54,7 @@ function mainFileLoop(objectMap) {
 
             // Get create/modify dates
             const createdDate = moment(fs.statSync(file).birthtime).format('MMM D, YYYY h:mm A');
-            if (m.matter.data.created != createdDate) {
+            if (m.matter.data.created === undefined || m.matter.data.created === null) {
                 m.matter.data.created = createdDate;
                 fs.writeFileSync(file, matter.stringify(m.matter.content, m.matter.data));
             }
